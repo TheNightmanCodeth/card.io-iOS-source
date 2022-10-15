@@ -4,7 +4,7 @@ import atexit
 import glob
 import os
 import re
-import shutil
+import shutil, errno
 import sys
 import tempfile
 import textwrap
@@ -23,7 +23,7 @@ from string_scripts.confirm_ready_for_release import confirm_ready_for_release a
 
 # --- Configuration ---------------------------------------------------------
 
-env.verbose = False
+env.verbose = True
 env.libname = "libCardIO.a"
 env.developer_dir = local("xcode-select -p", capture=True)
 
@@ -127,11 +127,6 @@ def build(outdir=None, device_sdk=None, simulator_sdk=None, **kwargs):
     device_sdk = device_sdk or "iphoneos"
     simulator_sdk = simulator_sdk or "iphonesimulator"
 
-    arch_to_sdk = (
-                   ("i386", simulator_sdk),
-                   ("x86_64", simulator_sdk)
-                  )
-
     with settings(hide(*to_hide)):
         icc_root = local("git rev-parse --show-toplevel", capture=True)
 
@@ -164,28 +159,25 @@ def build(outdir=None, device_sdk=None, simulator_sdk=None, **kwargs):
 
                 # Build the Archive release
                 print(colors.blue("({build_config}) Building Archive (arm* architectures specified in build config)".format(**locals())))
-                base_xcodebuild_command = "xcrun xcodebuild -scheme \"CardIO Static Library\" -target CardIO-static -configuration {build_config} archive".format(**locals())
+                base_xcodebuild_command = "xcrun xcodebuild -project \"icc.xcodeproj\" -target CardIO-static -configuration {build_config} archive".format(**locals())
                 build_dir = os.path.join(temp_dir, build_config, "Archive")
                 arch_build_dirs["archive"] = build_dir
                 os.makedirs(build_dir)
                 parallelize = "" if env.verbose else "-parallelizeTargets"  # don't parallelize verbose builds, it's hard to read the output
                 build_cmd = "{base_xcodebuild_command} {parallelize} CONFIGURATION_BUILD_DIR={build_dir}  {extra_xcodebuild_settings}".format(**locals())
                 local(build_cmd)
-
-                for arch, sdk in arch_to_sdk:
-                    print(colors.blue("({build_config}) Building {arch}".format(**locals())))
-
-                    base_xcodebuild_command = "xcrun xcodebuild OTHER_CFLAGS='-fembed-bitcode' -target CardIO-static -arch {arch} -sdk {sdk} -configuration {build_config}".format(**locals())
-
-                    clean_cmd =  "{base_xcodebuild_command} clean".format(**locals())
-                    local(clean_cmd)
-
-                    build_dir = os.path.join(temp_dir, build_config, arch)
-                    arch_build_dirs[arch] = build_dir
-                    os.makedirs(build_dir)
-                    parallelize = "" if env.verbose else "-parallelizeTargets"  # don't parallelize verbose builds, it's hard to read the output
-                    build_cmd = "{base_xcodebuild_command} {parallelize} CONFIGURATION_BUILD_DIR={build_dir}  {extra_xcodebuild_settings}".format(**locals())
-                    local(build_cmd)
+		arch="arm64"
+	    	sdk=simulator_sdk                
+                print(colors.blue("({build_config}) Building {arch}".format(**locals())))
+                base_xcodebuild_command = "xcrun xcodebuild OTHER_CFLAGS='-fembed-bitcode' -project \"icc.xcodeproj\" -target CardIO-static -arch {arch} -sdk {sdk} -configuration {build_config}".format(**locals())
+                clean_cmd =  "{base_xcodebuild_command} clean".format(**locals())
+                local(clean_cmd)
+                build_dir = os.path.join(temp_dir, build_config, arch)
+                arch_build_dirs[arch] = build_dir
+                os.makedirs(build_dir)
+                parallelize = "" if env.verbose else "-parallelizeTargets"  # don't parallelize verbose builds, it's hard to read the output
+                build_cmd = "{base_xcodebuild_command} {parallelize} CONFIGURATION_BUILD_DIR={build_dir}  {extra_xcodebuild_settings}".format(**locals())
+                local(build_cmd)
 
                 print(colors.blue("({build_config}) Lipoing".format(**locals())))
                 lipo_dir = os.path.join(temp_dir, build_config, "universal")
@@ -193,10 +185,8 @@ def build(outdir=None, device_sdk=None, simulator_sdk=None, **kwargs):
                 os.makedirs(lipo_dir)
                 arch_build_dirs["universal"] = lipo_dir
                 # in Xcode 4.5 GM, xcrun selects the wrong lipo to use, so circumventing xcrun for now :(
-                lipo_cmd = "`xcode-select -print-path`/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo " \
-                           "           {archive}/{libname}" \
-                           "           -arch i386 {i386}/{libname}" \
-                           "           -arch x86_64 {x86_64}/{libname}" \
+                lipo_cmd = "xcrun lipo " \
+                           "           -arch arm64 {arm64}/{libname}" \
                            "           -create" \
                            "           -output {universal}/{libname}".format(libname=env.libname, **arch_build_dirs)
                 local(lipo_cmd)
